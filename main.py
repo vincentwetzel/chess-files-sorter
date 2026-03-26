@@ -4,9 +4,12 @@ import os
 import shutil
 import re
 import numpy as np
-from collections import Counter
+from collections import Counter, defaultdict
 import configparser
 import sys
+import subprocess
+import json
+from datetime import datetime
 
 # --- CONFIGURATION ---
 config = configparser.ConfigParser()
@@ -23,7 +26,7 @@ except (configparser.NoSectionError, configparser.NoOptionError) as e:
 
 pytesseract.pytesseract.tesseract_cmd = TESS_PATH
 
-EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.flv')
+EXTENSIONS = ('.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm')
 INTERVAL_SECONDS = 60
 ROI_TOP_RATIO = 0.0
 ROI_HEIGHT_RATIO = 0.14
@@ -178,7 +181,9 @@ def process_directory(source_dir):
     """
     Traverses the directory, analyzes videos, and moves them.
     """
+    print("\n--- Phase 1: Sorting Videos ---")
     subdirs = [d for d in os.listdir(source_dir) if os.path.isdir(os.path.join(source_dir, d))]
+    sorted_count, skipped_count = 0, 0
     
     for subdir in subdirs:
         if subdir.startswith(('_', '.')): continue
@@ -192,8 +197,75 @@ def process_directory(source_dir):
             
             if tournament:
                 move_video(file_path, subdir_path, tournament, m, c)
+                sorted_count += 1
             else:
                 print(f"  [SKIP] {file} (Header incomplete)")
+                skipped_count += 1
+                
+    return sorted_count, skipped_count
+
+def get_video_codec(file_path):
+    """Uses ffprobe to extract the video codec name."""
+    cmd = [
+        'ffprobe', '-v', 'error', '-select_streams', 'v:0', 
+        '-show_entries', 'stream=codec_name', '-of', 'json', file_path
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        data = json.loads(result.stdout)
+        return data['streams'][0]['codec_name'] if data.get('streams') else 'no_video_stream'
+    except Exception:
+        return 'error_reading_file'
+
+def report_codecs(source_dir):
+    """Scans the directory and groups files by codec."""
+    results = defaultdict(list)
+    total_scanned = 0
+    print(f"\n--- Phase 2: Codec Scanning ({source_dir}) ---")
+    for root, dirs, files in os.walk(source_dir):
+        for file in files:
+            if file.lower().endswith(EXTENSIONS):
+                full_path = os.path.join(root, file)
+                codec = get_video_codec(full_path)
+                results[codec].append(full_path)
+                total_scanned += 1
+
+    print("\n--- Files Grouped by Codec (H264 Priority) ---")
+    if 'h264' in results:
+        print(f"\nCODEC: H264 (Priority)")
+        for f in results['h264']:
+            print(f"  - {f}")
+    
+    other_codecs = sorted([c for c in results.keys() if c != 'h264'])
+    for codec in other_codecs:
+        print(f"\nCODEC: {codec.upper()}")
+        for f in results[codec]:
+            print(f"  - {f}")
+    return total_scanned
+
+def count_and_log_files(source_dir):
+    """Counts all non-script files and logs the total."""
+    print(f"\n--- Phase 3: File Counting ({source_dir}) ---")
+    log_filename = "file_count_log.txt"
+    log_path = os.path.join(source_dir, log_filename)
+    total_files = 0
+
+    for root, dirs, files in os.walk(source_dir):
+        for file in files:
+            if not file.endswith('.py') and file != log_filename:
+                total_files += 1
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = f"[{timestamp}] Total files: {total_files}\n"
+
+    try:
+        with open(log_path, "a") as f:
+            f.write(log_entry)
+        print(f"Successfully logged {total_files} files to {log_filename} at {timestamp}")
+    except Exception as e:
+        print(f"Error writing to log: {e}")
+        
+    return total_files
 
 def main():
     if not os.path.exists(TESS_PATH):
@@ -202,7 +274,18 @@ def main():
     print(f"{'='*80}\nCHESS TOURNAMENT SORTER (THICK-TEXT MODE)\n{'='*80}")
 
     try:
-        process_directory(SOURCE_DIR)
+        sorted_count, skipped_count = process_directory(SOURCE_DIR)
+        total_scanned = report_codecs(SOURCE_DIR)
+        total_files = count_and_log_files(SOURCE_DIR)
+        
+        print(f"\n{'='*80}")
+        print("FINAL REPORT")
+        print(f"{'='*80}")
+        print(f"Videos Sorted:  {sorted_count}")
+        print(f"Videos Skipped: {skipped_count}")
+        print(f"Total Videos Scanned for Codecs: {total_scanned}")
+        print(f"Total Files in Directory: {total_files}")
+        print(f"{'='*80}")
     except Exception as e:
         print(f"\nCRITICAL ERROR: {e}")
 
