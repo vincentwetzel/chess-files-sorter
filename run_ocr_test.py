@@ -20,3 +20,5 @@ for img_name in os.listdir(assets_dir):
             print(f"PASSED: {img_name}")
         else:
             print(f"FAILED: {img_name} - Expected: '{expected}', Got: '{result}'")
+
+input("\nTest run complete. Press Enter to exit...")
