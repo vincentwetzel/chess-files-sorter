@@ -22,10 +22,4 @@ pushd "%ROOT_DIR%" || (
 )
 
 rem Directly call system python 
-python main.py 
-
-popd
-
-echo.
-echo Done.
-pause
+python main.py

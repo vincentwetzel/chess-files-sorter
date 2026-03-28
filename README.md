@@ -39,6 +39,7 @@ You can configure the behavior of the script by modifying the constants at the t
    - Only left-anchored OCR lines from the header area are kept.
    - Invalid characters for Windows folders (`*`, `:`, `<`, `>`, `?`, `|`, `/`, `\`) are stripped or replaced.
 6. **Majority Voting & Sorting**: The script tallies up the readings from all sampled frames. The most frequently detected tournament name is chosen. The video is then moved to `SOURCE_DIR/subdir/Tournament Name/`.
+7. **Folder Renaming**: Analyzes each tournament folder and main subdirectory to append the total count of video files inside them to the folder name in square brackets (e.g., `Tournament Name [2]`). It also verifies and updates existing counts if the number of videos has changed.
 
 ## Usage
 

@@ -170,11 +170,27 @@ def move_video(file_path, subdir_path, tournament, matches, checks):
     Handles the physical file moving logic.
     """
     file = os.path.basename(file_path)
-    target_dir = os.path.join(subdir_path, tournament)
-    if not os.path.exists(target_dir):
+    
+    existing_dir = None
+    if os.path.exists(subdir_path):
+        for d in os.listdir(subdir_path):
+            d_path = os.path.join(subdir_path, d)
+            if not os.path.isdir(d_path): continue
+                
+            match = re.search(r'\s*\[(\d+)\]$', d)
+            base_name = d[:match.start()].strip() if match else d.strip()
+            
+            if base_name.lower() == tournament.lower():
+                existing_dir = d_path
+                break
+                
+    if existing_dir:
+        target_dir = existing_dir
+    else:
+        target_dir = os.path.join(subdir_path, tournament)
         os.makedirs(target_dir)
     
-    print(f"  [SORT] {file} -> {tournament} ({matches}/{checks})")
+    print(f"  [SORT] {file} -> {os.path.basename(target_dir)} ({matches}/{checks})")
     shutil.move(file_path, os.path.join(target_dir, file))
 
 def process_directory(source_dir):
@@ -204,6 +220,86 @@ def process_directory(source_dir):
                 
     return sorted_count, skipped_count
 
+def update_folder_video_counts(source_dir):
+    """
+    Analyzes tournament subdirectories (depth 2) and their parent subdirectories (depth 1) 
+    and appends/updates the video count in square brackets at the end of their name.
+    """
+    print(f"\n--- Phase 2: Updating Folder Video Counts ---")
+    subdirs = [d for d in os.listdir(source_dir) if os.path.isdir(os.path.join(source_dir, d))]
+    renamed_count = 0
+    
+    for subdir in subdirs:
+        if subdir.startswith(('_', '.')): continue
+        subdir_path = os.path.join(source_dir, subdir)
+        
+        try:
+            tournament_folders = [d for d in os.listdir(subdir_path) if os.path.isdir(os.path.join(subdir_path, d))]
+        except Exception:
+            continue
+            
+        subdir_total_videos = 0
+            
+        for t_folder in tournament_folders:
+            t_folder_path = os.path.join(subdir_path, t_folder)
+            
+            try:
+                videos = [f for f in os.listdir(t_folder_path) if os.path.isfile(os.path.join(t_folder_path, f)) and f.lower().endswith(EXTENSIONS)]
+            except Exception:
+                continue
+                
+            video_count = len(videos)
+            subdir_total_videos += video_count
+            
+            match = re.search(r'\s*\[(\d+)\]$', t_folder)
+            if match:
+                current_count = int(match.group(1))
+                if current_count == video_count:
+                    continue
+                base_name = t_folder[:match.start()].strip()
+            else:
+                base_name = t_folder.strip()
+                
+            new_name = f"{base_name} [{video_count}]"
+            new_path = os.path.join(subdir_path, new_name)
+            
+            if t_folder != new_name:
+                try:
+                    os.rename(t_folder_path, new_path)
+                    print(f"  [RENAME] '{t_folder}' -> '{new_name}'")
+                    renamed_count += 1
+                except Exception as e:
+                    print(f"  [ERROR] Failed to rename '{t_folder}': {e}")
+                    
+        # Also count any loose videos directly in the parent subdir
+        try:
+            loose_videos = [f for f in os.listdir(subdir_path) if os.path.isfile(os.path.join(subdir_path, f)) and f.lower().endswith(EXTENSIONS)]
+            subdir_total_videos += len(loose_videos)
+        except Exception:
+            pass
+            
+        match = re.search(r'\s*\[(\d+)\]$', subdir)
+        if match:
+            current_count = int(match.group(1))
+            if current_count == subdir_total_videos:
+                continue
+            base_name = subdir[:match.start()].strip()
+        else:
+            base_name = subdir.strip()
+            
+        new_subdir_name = f"{base_name} [{subdir_total_videos}]"
+        new_subdir_path = os.path.join(source_dir, new_subdir_name)
+        
+        if subdir != new_subdir_name:
+            try:
+                os.rename(subdir_path, new_subdir_path)
+                print(f"  [RENAME] '{subdir}' -> '{new_subdir_name}'")
+                renamed_count += 1
+            except Exception as e:
+                print(f"  [ERROR] Failed to rename '{subdir}': {e}")
+                    
+    return renamed_count
+
 def get_video_codec(file_path):
     """Uses ffprobe to extract the video codec name."""
     cmd = [
@@ -220,32 +316,31 @@ def get_video_codec(file_path):
 def report_codecs(source_dir):
     """Scans the directory and groups files by codec."""
     results = defaultdict(list)
-    total_scanned = 0
-    print(f"\n--- Phase 2: Codec Scanning ({source_dir}) ---")
+    h264_count = 0
+    non_h264_count = 0
+    print(f"\n--- Phase 3: Codec Scanning ({source_dir}) ---")
     for root, dirs, files in os.walk(source_dir):
         for file in files:
             if file.lower().endswith(EXTENSIONS):
                 full_path = os.path.join(root, file)
                 codec = get_video_codec(full_path)
                 results[codec].append(full_path)
-                total_scanned += 1
+                if codec == 'h264':
+                    h264_count += 1
+                else:
+                    non_h264_count += 1
 
-    print("\n--- Files Grouped by Codec (H264 Priority) ---")
-    if 'h264' in results:
-        print(f"\nCODEC: H264 (Priority)")
-        for f in results['h264']:
-            print(f"  - {f}")
-    
+    print("\n--- Files Grouped by Codec (Non-H264) ---")
     other_codecs = sorted([c for c in results.keys() if c != 'h264'])
     for codec in other_codecs:
         print(f"\nCODEC: {codec.upper()}")
         for f in results[codec]:
             print(f"  - {f}")
-    return total_scanned
+    return h264_count, non_h264_count
 
 def count_and_log_files(source_dir):
     """Counts all non-script files and logs the total."""
-    print(f"\n--- Phase 3: File Counting ({source_dir}) ---")
+    print(f"\n--- Phase 4: File Counting ({source_dir}) ---")
     log_filename = "file_count_log.txt"
     log_path = os.path.join(source_dir, log_filename)
     total_files = 0
@@ -275,7 +370,8 @@ def main():
 
     try:
         sorted_count, skipped_count = process_directory(SOURCE_DIR)
-        total_scanned = report_codecs(SOURCE_DIR)
+        renamed_count = update_folder_video_counts(SOURCE_DIR)
+        h264_count, non_h264_count = report_codecs(SOURCE_DIR)
         total_files = count_and_log_files(SOURCE_DIR)
         
         print(f"\n{'='*80}")
@@ -283,7 +379,9 @@ def main():
         print(f"{'='*80}")
         print(f"Videos Sorted:  {sorted_count}")
         print(f"Videos Skipped: {skipped_count}")
-        print(f"Total Videos Scanned for Codecs: {total_scanned}")
+        print(f"Folders Renamed: {renamed_count}")
+        print(f"H264 Videos Scanned: {h264_count}")
+        print(f"Non-H264 Videos Scanned: {non_h264_count}")
         print(f"Total Files in Directory: {total_files}")
         print(f"{'='*80}")
     except Exception as e:
