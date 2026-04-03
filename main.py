@@ -20,6 +20,7 @@ if not config.read('config.ini'):
 try:
     TESS_PATH = config.get('Paths', 'TESS_PATH')
     SOURCE_DIR = config.get('Paths', 'SOURCE_DIR')
+    TO_SORT_DIR = config.get('Paths', 'TO_SORT_DIR')
 except (configparser.NoSectionError, configparser.NoOptionError) as e:
     print(f"Error reading config.ini: {e}")
     sys.exit(1)
@@ -35,10 +36,59 @@ LINE_ANCHOR_RATIO = 0.28
 
 
 def sanitize_tournament_text(text):
-    text = text.replace('“', '').replace('”', '').replace('"', '')
+    text = text.replace('"', '').replace('"', '').replace('"', '')
     text = text.replace('/', '-').replace('\\', '-')
     text = re.sub(r'[*:<>\?|]', '', text)
     return " ".join(text.split()).strip(". , : ; -")
+
+
+def extract_tournament_and_date_from_filename(filename):
+    """
+    Extracts the tournament name and date from a YouTube-style filename.
+
+    Example:
+        'GOTD -- Praggnanandhaa vs Javokhir Sindarov -- FIDE Candidates Tournament 2026 R3
+         [agadmator's Chess Channel][03-31-2026][4KxRXcpOtJE].mp4'
+        → tournament: 'FIDE Candidates Tournament 2026'
+        → date: '2026-03'
+
+    The tournament name is the text between the last '--' and the first '['.
+    Round numbers (R1, R2, etc.) and trailing words like 'R3' are stripped.
+    The date is extracted from the first [MM-DD-YYYY] bracket.
+    """
+    name_without_ext = os.path.splitext(filename)[0]
+
+    # Extract date from [MM-DD-YYYY] pattern
+    date_match = re.search(r'\[(\d{2})-(\d{2})-(\d{4})\]', name_without_ext)
+    if not date_match:
+        return None, None
+
+    month, day, year = date_match.group(1), date_match.group(2), date_match.group(3)
+    year_month = f"{year} - {month}"
+
+    # Extract tournament name: text between last '--' and first '['
+    parts = name_without_ext.split('--')
+    if len(parts) < 2:
+        return None, year_month
+
+    # The tournament name is in the last segment before the brackets
+    tournament_raw = parts[-1].strip()
+
+    # Remove everything from the first '[' onward
+    bracket_idx = tournament_raw.find('[')
+    if bracket_idx != -1:
+        tournament_raw = tournament_raw[:bracket_idx].strip()
+
+    # Strip round numbers like 'R3', 'R4', 'Round 3', etc. from the end
+    tournament_raw = re.sub(r'\s+[Rr]ound?\s*\d+\s*$', '', tournament_raw)
+    tournament_raw = re.sub(r'\s+[Rr]\d+\s*$', '', tournament_raw)
+
+    tournament = sanitize_tournament_text(tournament_raw)
+
+    if not tournament:
+        return None, year_month
+
+    return tournament, year_month
 
 
 def clean_ocr_results(ocr_data, left_limit):
@@ -220,6 +270,90 @@ def process_directory(source_dir):
                 
     return sorted_count, skipped_count
 
+def find_year_month_folder(year_month, source_dir):
+    """
+    Finds an existing year/month folder (e.g., '2026 - 03 [35]') in source_dir.
+    Returns the folder path or None if not found.
+    """
+    for d in os.listdir(source_dir):
+        d_path = os.path.join(source_dir, d)
+        if not os.path.isdir(d_path):
+            continue
+        # Match pattern: 'YYYY - MM [N]' or 'YYYY - MM'
+        match = re.match(r'^(\d{4})\s*-\s*(\d{2})', d)
+        if match:
+            folder_year = match.group(1)
+            folder_month = match.group(2)
+            if f"{folder_year} - {folder_month}" == year_month:
+                return d_path
+    return None
+
+def sort_to_sort_directory(to_sort_dir, source_dir):
+    """
+    Processes files in the _TO_SORT directory using filename-based extraction.
+    Moves files to year/month > tournament folder structure within source_dir.
+    """
+    print("\n--- Phase 0: Sorting _TO_SORT Videos (Filename-Based) ---")
+    if not os.path.exists(to_sort_dir):
+        print(f"  [INFO] TO_SORT_DIR not found: {to_sort_dir}")
+        return 0, 0
+
+    video_files = [f for f in os.listdir(to_sort_dir) if f.lower().endswith(EXTENSIONS)]
+    sorted_count, skipped_count = 0, 0
+
+    for file in video_files:
+        file_path = os.path.join(to_sort_dir, file)
+        if not os.path.isfile(file_path):
+            continue
+
+        tournament, year_month = extract_tournament_and_date_from_filename(file)
+
+        if not tournament or not year_month:
+            print(f"  [SKIP] {file} (Could not extract tournament/date from filename)")
+            skipped_count += 1
+            continue
+
+        # Find or create year/month folder
+        ym_folder = find_year_month_folder(year_month, source_dir)
+        if not ym_folder:
+            ym_folder = os.path.join(source_dir, year_month)
+            os.makedirs(ym_folder, exist_ok=True)
+            print(f"  [MKDIR] {os.path.basename(ym_folder)}")
+
+        # Find or create tournament folder inside year/month folder
+        tournament_target = None
+        for d in os.listdir(ym_folder):
+            d_path = os.path.join(ym_folder, d)
+            if not os.path.isdir(d_path):
+                continue
+            # Strip [N] suffix for comparison
+            match = re.search(r'\s*\[(\d+)\]$', d)
+            base_name = d[:match.start()].strip() if match else d.strip()
+            if base_name.lower() == tournament.lower():
+                tournament_target = d_path
+                break
+
+        if not tournament_target:
+            tournament_target = os.path.join(ym_folder, tournament)
+            os.makedirs(tournament_target, exist_ok=True)
+
+        print(f"  [SORT] {file}")
+        print(f"          → {year_month} > {os.path.basename(tournament_target)}")
+        shutil.move(file_path, os.path.join(tournament_target, file))
+        sorted_count += 1
+
+    # Remove the _TO_SORT folder if it's now empty
+    if sorted_count > 0 and os.path.exists(to_sort_dir):
+        remaining = [f for f in os.listdir(to_sort_dir) if not f.startswith('.')]
+        if not remaining:
+            try:
+                os.rmdir(to_sort_dir)
+                print(f"  [CLEANUP] Removed empty directory: {os.path.basename(to_sort_dir)}")
+            except Exception as e:
+                print(f"  [ERROR] Could not remove {os.path.basename(to_sort_dir)}: {e}")
+
+    return sorted_count, skipped_count
+
 def update_folder_video_counts(source_dir):
     """
     Analyzes tournament subdirectories (depth 2) and their parent subdirectories (depth 1) 
@@ -369,14 +503,17 @@ def main():
     print(f"{'='*80}\nCHESS TOURNAMENT SORTER (THICK-TEXT MODE)\n{'='*80}")
 
     try:
+        to_sort_sorted, to_sort_skipped = sort_to_sort_directory(TO_SORT_DIR, SOURCE_DIR)
         sorted_count, skipped_count = process_directory(SOURCE_DIR)
         renamed_count = update_folder_video_counts(SOURCE_DIR)
         h264_count, non_h264_count = report_codecs(SOURCE_DIR)
         total_files = count_and_log_files(SOURCE_DIR)
-        
+
         print(f"\n{'='*80}")
         print("FINAL REPORT")
         print(f"{'='*80}")
+        print(f"_TO_SORT Videos Sorted:  {to_sort_sorted}")
+        print(f"_TO_SORT Videos Skipped: {to_sort_skipped}")
         print(f"Videos Sorted:  {sorted_count}")
         print(f"Videos Skipped: {skipped_count}")
         print(f"Folders Renamed: {renamed_count}")
