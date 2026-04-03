@@ -10,6 +10,8 @@ import sys
 import subprocess
 import json
 from datetime import datetime
+import sqlite3
+import argparse
 
 # --- CONFIGURATION ---
 config = configparser.ConfigParser()
@@ -40,6 +42,83 @@ def sanitize_tournament_text(text):
     text = text.replace('/', '-').replace('\\', '-')
     text = re.sub(r'[*:<>\?|]', '', text)
     return " ".join(text.split()).strip(". , : ; -")
+
+
+class CodecDatabase:
+    """SQLite-backed database for caching video codec information."""
+
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self.conn = sqlite3.connect(db_path)
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS codec_cache (
+                file_path TEXT PRIMARY KEY,
+                codec_name TEXT NOT NULL,
+                file_mtime REAL NOT NULL,
+                file_size INTEGER NOT NULL,
+                cached_at TEXT NOT NULL
+            )
+        """)
+        self.conn.commit()
+
+    def get(self, file_path):
+        """Returns cached codec if file hasn't changed, otherwise None."""
+        if not os.path.exists(file_path):
+            self._delete(file_path)
+            return None
+
+        stat = os.stat(file_path)
+        cursor = self.conn.execute(
+            "SELECT codec_name, file_mtime, file_size FROM codec_cache WHERE file_path = ?",
+            (file_path,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+
+        cached_codec, cached_mtime, cached_size = row
+        if cached_mtime == stat.st_mtime and cached_size == stat.st_size:
+            return cached_codec
+        else:
+            # File changed, remove stale entry
+            self._delete(file_path)
+            return None
+
+    def set(self, file_path, codec):
+        """Inserts or updates a codec entry."""
+        stat = os.stat(file_path)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.conn.execute(
+            """INSERT OR REPLACE INTO codec_cache
+               (file_path, codec_name, file_mtime, file_size, cached_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (file_path, codec, stat.st_mtime, stat.st_size, now)
+        )
+        self.conn.commit()
+
+    def _delete(self, file_path):
+        self.conn.execute("DELETE FROM codec_cache WHERE file_path = ?", (file_path,))
+        self.conn.commit()
+
+    def cleanup(self, source_dir):
+        """Removes entries for files that no longer exist in source_dir."""
+        cursor = self.conn.execute("SELECT file_path FROM codec_cache")
+        to_delete = []
+        for (file_path,) in cursor:
+            if not os.path.exists(file_path):
+                to_delete.append(file_path)
+
+        if to_delete:
+            self.conn.executemany(
+                "DELETE FROM codec_cache WHERE file_path = ?",
+                [(p,) for p in to_delete]
+            )
+            self.conn.commit()
+            print(f"  [DB CLEANUP] Removed {len(to_delete)} stale entries")
+
+    def close(self):
+        self.conn.close()
 
 
 def extract_tournament_and_date_from_filename(filename):
@@ -447,22 +526,39 @@ def get_video_codec(file_path):
     except Exception:
         return 'error_reading_file'
 
-def report_codecs(source_dir):
-    """Scans the directory and groups files by codec."""
+def report_codecs(source_dir, codec_db):
+    """Scans the directory and groups files by codec, using a cache database."""
+    # Cleanup stale entries first
+    codec_db.cleanup(source_dir)
+
     results = defaultdict(list)
     h264_count = 0
     non_h264_count = 0
+    cache_hits = 0
+    cache_misses = 0
+
     print(f"\n--- Phase 3: Codec Scanning ({source_dir}) ---")
     for root, dirs, files in os.walk(source_dir):
         for file in files:
             if file.lower().endswith(EXTENSIONS):
                 full_path = os.path.join(root, file)
-                codec = get_video_codec(full_path)
+
+                # Check cache first
+                codec = codec_db.get(full_path)
+                if codec is not None:
+                    cache_hits += 1
+                else:
+                    cache_misses += 1
+                    codec = get_video_codec(full_path)
+                    codec_db.set(full_path, codec)
+
                 results[codec].append(full_path)
                 if codec == 'h264':
                     h264_count += 1
                 else:
                     non_h264_count += 1
+
+    print(f"  [CACHE] Hits: {cache_hits}, Misses: {cache_misses}")
 
     print("\n--- Files Grouped by Codec (Non-H264) ---")
     other_codecs = sorted([c for c in results.keys() if c != 'h264'])
@@ -496,17 +592,21 @@ def count_and_log_files(source_dir):
         
     return total_files
 
-def main():
+def main(no_pause=False):
     if not os.path.exists(TESS_PATH):
         print("Tesseract path error."); input(); return
 
     print(f"{'='*80}\nCHESS TOURNAMENT SORTER (THICK-TEXT MODE)\n{'='*80}")
 
+    # Initialize codec database
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'codec_cache.db')
+    codec_db = CodecDatabase(db_path)
+
     try:
         to_sort_sorted, to_sort_skipped = sort_to_sort_directory(TO_SORT_DIR, SOURCE_DIR)
         sorted_count, skipped_count = process_directory(SOURCE_DIR)
         renamed_count = update_folder_video_counts(SOURCE_DIR)
-        h264_count, non_h264_count = report_codecs(SOURCE_DIR)
+        h264_count, non_h264_count = report_codecs(SOURCE_DIR, codec_db)
         total_files = count_and_log_files(SOURCE_DIR)
 
         print(f"\n{'='*80}")
@@ -523,9 +623,21 @@ def main():
         print(f"{'='*80}")
     except Exception as e:
         print(f"\nCRITICAL ERROR: {e}")
+    finally:
+        codec_db.close()
 
-    # Pauses at the end as requested
-    input("\nTask complete. Press Enter to exit...")
+    if not no_pause:
+        input("\nTask complete. Press Enter to exit...")
+    else:
+        print("\nTask complete.")
+
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Chess Tournament Sorter")
+    parser.add_argument(
+        "--no-pause",
+        action="store_true",
+        help="Skip the final pause/input prompt"
+    )
+    args = parser.parse_args()
+    main(no_pause=args.no_pause)

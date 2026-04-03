@@ -47,5 +47,8 @@ tests/**/*.png
 # Local configuration
 config.ini
 
+# Codec cache
+codec_cache.db
+
 # Qwen Code
 .qwen/
