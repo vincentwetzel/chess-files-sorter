@@ -46,3 +46,6 @@ tests/**/*.png
 
 # Local configuration
 config.ini
+
+# Qwen Code
+.qwen/
