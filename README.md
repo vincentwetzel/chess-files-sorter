@@ -16,6 +16,7 @@ The script scans a designated source directory for video files (`.mp4`, `.mkv`, 
   ```
 - **Automated validation**: All code changes must pass `run_ocr_test.py` before they are accepted.
 - **OCR design rule**: Tournament-name detection must rely only on cropping the correct screen region and interpreting the OCR layout inside that crop. Word-by-word heuristics, token allowlists, token denylists, and other keyword-specific logic are project-prohibited.
+- **Documentation rule**: Whenever architectural, structural, or pipeline changes are made to the codebase (such as adding or removing phases), all relevant Markdown documentation (e.g., `ARCHITECTURE.md`, `SETTINGS.md`, `AGENTS.md`, `README.md`) MUST be updated synchronously to reflect the new state of the project.
 
 ## Configuration
 
@@ -28,7 +29,7 @@ You can configure the behavior of the script by modifying the constants at the t
 
 ## How it Works
 
-1. **Directory Scanning**: The script iterates through the subdirectories of the `SOURCE_DIR`, ignoring hidden folders (starting with `_` or `.`).
+1. **Directory Scanning**: The script first processes new files in the `TO_SORT_DIR` staging folder. It uses OCR to determine the tournament name and parses the filename for a date bracket (e.g., `[YYYY-MM-DD]`) to sort the file into a `YYYY - MM` parent folder. It then iterates through the subdirectories of the `SOURCE_DIR` (ignoring hidden folders starting with `_` or `.`).
 2. **Frame Extraction**: For each video, a frame is extracted every `INTERVAL_SECONDS`.
 3. **Region of Interest (ROI)**: The frame is cropped to the portion of the top-left overlay where tournament headers usually appear, keeping the OCR focused on the header instead of nearby commentary text.
 4. **Pre-processing**:

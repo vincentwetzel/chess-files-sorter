@@ -4,8 +4,6 @@ This document describes the internal architecture of the Chess Tournament Sorter
 
 *Note: To prevent excessive AI agent token usage, a strict project rule limits all code source files to a maximum of 300 lines. The system is designed to be highly modular to satisfy this requirement.*
 
-*Documentation Rule: Any structural, pipeline, or architectural changes made to the codebase MUST be accompanied by immediate updates to this and other relevant Markdown documentation to keep the system state accurate.*
-
 ## System Overview
 
 The Chess Tournament Sorter is a modular Python application that automates the categorization of chess tournament videos. It works by extracting frames from videos, running OCR on the broadcast overlay region, identifying the tournament name through majority voting, and then physically moving files into organized directories.
@@ -115,18 +113,6 @@ Video File
 - **Left-Anchor Filtering:** Discards any line whose left edge is beyond `LINE_ANCHOR_RATIO × ROI_width`, removing sidebar commentary and unrelated text.
 - **Sanitization:** Strips Windows-illegal characters (`* : < > ? | / \`) and collapses consecutive whitespace. Replaces forward slashes with hyphens so the output is a valid folder name.
 
-### 5b. Filename-Based Tournament Extractor (`extract_tournament_and_date_from_filename`)
-
-**Functions:** `extract_tournament_and_date_from_filename()`, `find_year_month_folder()`, `sort_to_sort_directory()`
-
-- **Purpose:** Processes files in the `TO_SORT_DIR` staging directory without using OCR. Instead, it parses the YouTube-style filename to extract tournament name and upload date.
-- **Filename Pattern:** `PREFIX -- Players -- Tournament Name R3 [Channel][MM-DD-YYYY][VideoID].ext`
-- **Date Extraction:** Uses regex `\[(\d{2})-(\d{2})-(\d{4})\]` to find the `[MM-DD-YYYY]` bracket and produces a `YYYY - MM` year/month string.
-- **Tournament Extraction:** Takes the text between the last `--` separator and the first `[` bracket, then strips trailing round numbers (`R3`, `Round 3`, etc.) using regex.
-- **Sanitization:** Passes the result through `sanitize_tournament_text()` to produce a folder-safe name.
-- **Year/Month Folder Matching:** `find_year_month_folder()` scans `SOURCE_DIR` for folders matching the `YYYY - MM` pattern (with optional `[N]` suffix) and returns the existing folder path if found.
-- **Sorting Logic:** `sort_to_sort_directory()` creates the `YYYY - MM` folder if needed, then creates or finds the tournament subfolder inside it, and moves the file there.
-
 ### 6. Image Analysis Helper (`analyze_image`)
 
 **Functions:** `analyze_image()`
@@ -137,9 +123,8 @@ Video File
 
 ### 7. File Management Agent (`os` + `shutil`)
 
-**Functions:** `move_video()`, `update_folder_video_counts()`, `process_directory()`, `process_staging_directory()`
+**Functions:** `move_video()`, `update_folder_video_counts()`, `process_directory()`
 
-- **process_staging_directory():** Processes loose video files in the `TO_SORT_DIR` staging area using OCR to find the tournament name. Extracts the upload date bracket (e.g., `[YYYY-MM-DD]`) from the filename to route the video into the correct `YYYY - MM` parent directory within `SOURCE_DIR`.
 - **process_directory():** Iterates over all subdirectories of `SOURCE_DIR`, skipping hidden folders (`_` or `.` prefix). For each video file, calls `analyze_video()` and then `move_video()` if a tournament name is found.
 - **move_video():** Checks for an existing tournament folder (case-insensitive match, accounting for the `[N]` suffix). Creates a new directory if none exists. Moves the video file using `shutil.move()`.
 - **update_folder_video_counts():** Walks through all tournament folders at depth 2 and parent subdirectories at depth 1. Counts `.mp4`, `.mkv`, etc. files inside each. Renames the directory to append `[count]` if the current suffix is missing or inaccurate. Also counts loose video files in parent directories and updates their names accordingly.
@@ -188,9 +173,6 @@ SOURCE_DIR/
 │   └── video3.mp4 ──▶ analyze_video() ──▶ "Tata Steel 2025"
 │
 │ After Phase 1:
-│ ├── 2026 - 04/
-│ │   └── Tata Steel 2026/
-│ │       └── video_new_[2026-04-15].mp4
 │ ├── Candidates 2024/
 │ │   ├── video1.mp4
 │ │   └── video2.mkv

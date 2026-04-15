@@ -7,12 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- `config.ini`-based configuration for `TESS_PATH`, `SOURCE_DIR`, and `TO_SORT_DIR` (replacing hardcoded paths in `main.py`).
+- `config.ini`-based configuration for `TESS_PATH` and `SOURCE_DIR` (replacing hardcoded paths in `main.py`).
 - `config.example.ini` as a template for new installations.
-- Phase 0: `_TO_SORT` directory processing — filename-based tournament extraction for newly downloaded YouTube videos. Files are sorted into `YYYY - MM / Tournament Name` folder structure.
-- `extract_tournament_and_date_from_filename()` — parses YouTube-style filenames to extract tournament name and upload date.
-- `find_year_month_folder()` — locates existing year/month folders (e.g., `2026 - 03 [35]`) to avoid duplicates.
-- `sort_to_sort_directory()` — processes the `TO_SORT_DIR` staging directory, creating year/month and tournament folders as needed.
 - Phase 4: File counting and logging — recursively counts all non-script files in `SOURCE_DIR` and appends a timestamped entry to `file_count_log.txt`.
 
 ### Changed

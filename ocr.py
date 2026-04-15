@@ -12,9 +12,12 @@ pytesseract.pytesseract.tesseract_cmd = TESS_PATH
 
 def sanitize_tournament_text(text):
     text = text.replace('"', '').replace('"', '').replace('"', '')
-    text = text.replace('/', '-').replace('\\', '-')
+    text = text.replace("/", "-").replace("\\", "-")
     text = re.sub(r'[*:<>\?|]', '', text)
-    return " ".join(text.split()).strip(". , : ; -")
+    text = " ".join(text.split()).strip(". , : ; -")
+    text = re.sub(r'\b[Il1]{2,3}\b', 'III', text)
+    text = re.sub(r'\bClash\b', 'Class', text, flags=re.IGNORECASE)
+    return text
 
 def clean_ocr_results(ocr_data, left_limit):
     """
@@ -73,21 +76,16 @@ def process_frame(frame):
     left_limit = int(roi.shape[1] * LINE_ANCHOR_RATIO)
 
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    scale_factor = 2
-    scaled = cv2.resize(gray, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
-    _, thresh = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Keep the OCR input high-contrast and thicken thin glyphs so Tesseract
+    # is less likely to drop narrow characters such as a leading digit.
+    if np.mean(binary) < 127:
+        binary = cv2.bitwise_not(binary)
+
     kernel = np.ones((2, 2), np.uint8)
-    thickened = cv2.dilate(thresh, kernel, iterations=1)
-    inverted = cv2.bitwise_not(thickened)
-
-    data = pytesseract.image_to_data(inverted, config='--oem 3 --psm 11', output_type=pytesseract.Output.DICT)
-
-    if 'left' in data:
-        for i in range(len(data['left'])):
-            data['left'][i] = int(data['left'][i] / scale_factor)
-            data['top'][i] = int(data['top'][i] / scale_factor)
-            data['width'][i] = int(data['width'][i] / scale_factor)
-            data['height'][i] = int(data['height'][i] / scale_factor)
+    processed = cv2.dilate(binary, kernel, iterations=1)
+    data = pytesseract.image_to_data(processed, config='--oem 3 --psm 11', output_type=pytesseract.Output.DICT)
 
     return clean_ocr_results(data, left_limit=left_limit)
 

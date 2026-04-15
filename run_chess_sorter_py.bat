@@ -2,7 +2,7 @@
 rem -- Windows .bat to run ChessSorter from J:\CHESS -- [cite: 1]
 
 rem Set script folder
-set ROOT_DIR=i:\coding_workspaces\Python\ChessSorter
+set ROOT_DIR=E:\coding_workspaces\Python\ChessSorter
 
 rem If 1st arg is provided, use it as source directory; 
 if "%~1"=="" (
@@ -23,3 +23,5 @@ pushd "%ROOT_DIR%" || (
 
 rem Directly call system python 
 python main.py
+
+pause
