@@ -126,10 +126,28 @@ def report_codecs(source_dir, codec_db):
 
     print("\n--- Files Grouped by Codec (Non-H264) ---")
     other_codecs = sorted([c for c in results.keys() if c != 'h264'])
+    
+    report_lines = []
     for codec in other_codecs:
         print(f"\nCODEC: {codec.upper()}")
+        report_lines.append(f"CODEC: {codec.upper()}")
         for f in results[codec]:
-            print(f"  - {f}")
+            # Replace full-width characters to prevent Windows console line-wrap glitches
+            display_f = f.replace('＂', '"').replace('｜', '|')
+            print(f"  - {display_f}")
+            report_lines.append(f"  - {f}")
+            
+    if other_codecs:
+        report_path = os.path.join(source_dir, "non_h264_videos.txt")
+        try:
+            with open(report_path, "w", encoding="utf-8") as rf:
+                rf.write("--- Files Grouped by Codec (Non-H264) ---\n\n")
+                rf.write("\n".join(report_lines))
+                rf.write("\n")
+            print(f"\n  [INFO] Full list saved to {report_path}")
+        except Exception as e:
+            print(f"\n  [ERROR] Could not save report file: {e}")
+
     return h264_count, non_h264_count
 
 def count_and_log_files(source_dir):

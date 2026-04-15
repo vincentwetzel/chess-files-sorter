@@ -16,7 +16,6 @@ def sanitize_tournament_text(text):
     text = re.sub(r'[*:<>\?|]', '', text)
     text = " ".join(text.split()).strip(". , : ; -")
     text = re.sub(r'\b[Il1]{2,3}\b', 'III', text)
-    text = re.sub(r'\bClash\b', 'Class', text, flags=re.IGNORECASE)
     return text
 
 def clean_ocr_results(ocr_data, left_limit):
