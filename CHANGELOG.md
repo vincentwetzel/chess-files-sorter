@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- updated git URL.
 - `config.ini`-based configuration for `TESS_PATH`, `SOURCE_DIR`, and `TO_SORT_DIR` (replacing hardcoded paths in `main.py`).
 - `config.example.ini` as a template for new installations.
 - Phase 0: `_TO_SORT` directory processing — filename-based tournament extraction for newly downloaded YouTube videos. Files are sorted into `YYYY - MM / Tournament Name` folder structure.
